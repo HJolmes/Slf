@@ -19,7 +19,9 @@ const rooms = new Map();
 
 const DEFAULT_CATEGORIES = ['Stadt', 'Land', 'Fluss', 'Name', 'Tier', 'Beruf'];
 const ALPHABET = 'ABCDEFGHIJKLMNOPRSTUVW'.split(''); // Q/X/Y/Z ausgelassen (zu schwer)
-const COUNTDOWN_MS = 5000;
+const REVEAL_ROLL_MS = 3000;  // Alphabet-Roll-Dauer
+const REVEAL_SHOW_MS = 2000;  // Chosen letter being shown
+const COUNTDOWN_MS = REVEAL_ROLL_MS + REVEAL_SHOW_MS;
 const DISCONNECT_GRACE_MS = 90_000; // 90s Karenz für Reload/Reconnect
 
 function generateRoomCode() {
@@ -112,8 +114,9 @@ function publicState(room, viewerId = null) {
     code: room.code,
     hostId: room.hostId,
     state: room.state,
-    letter: room.state === 'countdown' ? null : room.letter, // im Countdown noch geheim
-    revealLetter: room.state === 'countdown' ? false : !!room.letter,
+    letter: room.letter,
+    revealRollMs: REVEAL_ROLL_MS,
+    revealShowMs: REVEAL_SHOW_MS,
     categories: room.categories,
     currentRound: room.currentRound,
     totalRounds: room.totalRounds,
@@ -291,7 +294,12 @@ io.on('connection', (socket) => {
     if (!room || room.state !== 'playing') return;
     const player = room.players.get(socket.id);
     if (!player) return;
+    const prevFilled = Object.values(player.answers || {}).filter(a => (a || '').trim()).length;
     player.answers[category] = (value || '').slice(0, 60);
+    const newFilled = Object.values(player.answers).filter(a => (a || '').trim()).length;
+    // Broadcast nur wenn sich die Anzahl ausgefuellter Felder geaendert hat -
+    // verhindert Spam bei jedem Tastenanschlag, hält Fortschritts-Chips aber aktuell.
+    if (prevFilled !== newFilled) broadcast(room);
   });
 
   socket.on('force-stop-round', () => {

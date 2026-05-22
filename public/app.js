@@ -212,13 +212,34 @@
     $('#cd-total').textContent = room.totalRounds;
     state.lastFormSig = null; // Spiel-Form muss neu aufgebaut werden
     if (state.countdownHandle) clearInterval(state.countdownHandle);
+
+    const ALPHA = 'ABCDEFGHIJKLMNOPRSTUVW'.split('');
+    const showMs = room.revealShowMs || 2000;
+    const settleAt = room.countdownEnd - showMs;
+    const finalLetter = room.letter;
+    const numEl = $('#countdown-num');
+    const msgEl = $('#cd-message');
+
     const tick = () => {
-      const remaining = Math.max(0, Math.ceil((room.countdownEnd - Date.now()) / 1000));
-      $('#countdown-num').textContent = remaining > 0 ? remaining : 'LOS!';
-      if (remaining <= 0) clearInterval(state.countdownHandle);
+      const now = Date.now();
+      if (now >= settleAt && finalLetter) {
+        // Settle-Phase: gewählten Buchstaben groß und ruhig anzeigen
+        if (numEl.textContent !== finalLetter) {
+          numEl.textContent = finalLetter;
+          numEl.classList.add('settled');
+        }
+        msgEl.textContent = 'Der Buchstabe ist…';
+      } else {
+        // Roll-Phase: zufällige Buchstaben rasch durchwechseln
+        const r = ALPHA[Math.floor(Math.random() * ALPHA.length)];
+        numEl.textContent = r;
+        numEl.classList.remove('settled');
+        msgEl.textContent = 'Buchstabe wird ausgelost…';
+      }
+      if (now >= room.countdownEnd) clearInterval(state.countdownHandle);
     };
     tick();
-    state.countdownHandle = setInterval(tick, 100);
+    state.countdownHandle = setInterval(tick, 70);
   }
 
   function renderPlay(room) {
@@ -254,19 +275,24 @@
         wrap.appendChild(input);
         form.appendChild(wrap);
       }
-      setTimeout(() => form.querySelector('input')?.focus(), 60);
-    }
 
-    // Eigene Antworten vom Server zurückspielen (z.B. nach Reload)
-    if (room.myAnswers) {
-      for (const input of $$('#play-form input')) {
-        const cat = input.dataset.cat;
-        const serverVal = room.myAnswers[cat];
-        if (serverVal && !input.value) {
-          input.value = serverVal;
-          input.classList.add('filled');
+      // Antworten EINMAL nach Form-Build wiederherstellen (z.B. nach Reload).
+      // Spätere Render überschreiben Felder NICHT mehr — sonst würde gelöschter Text
+      // bei einem nachfolgenden Broadcast wieder zurückkommen ('klebriges' Feld).
+      if (room.myAnswers) {
+        for (const input of form.querySelectorAll('input')) {
+          const serverVal = room.myAnswers[input.dataset.cat];
+          if (serverVal) {
+            input.value = serverVal;
+            input.classList.add('filled');
+          }
         }
       }
+
+      setTimeout(() => {
+        const firstEmpty = Array.from(form.querySelectorAll('input')).find(i => !i.value);
+        (firstEmpty || form.querySelector('input'))?.focus();
+      }, 60);
     }
 
     startTimer(room.endTime);

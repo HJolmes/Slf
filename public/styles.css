@@ -248,12 +248,20 @@ body {
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  animation: cdpop .9s ease forwards;
+  font-variant-numeric: tabular-nums;
+  transition: transform .25s ease;
+  opacity: 0.55;
+  filter: blur(1.5px);
+}
+.countdown-number.settled {
+  opacity: 1;
+  filter: none;
+  animation: cdpop .45s cubic-bezier(.18,.89,.32,1.28);
 }
 @keyframes cdpop {
-  0% { transform: scale(0.4); opacity: 0; }
-  40% { transform: scale(1.1); opacity: 1; }
-  100% { transform: scale(1); opacity: 1; }
+  0% { transform: scale(0.5); }
+  60% { transform: scale(1.15); }
+  100% { transform: scale(1); }
 }
 
 /* Toast */
