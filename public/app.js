@@ -352,8 +352,8 @@
     info.innerHTML = '';
     const base = document.createElement('span');
     base.textContent = stopper
-      ? `${stopper.name} hat gestoppt — Schreibfehler sind automatisch korrigiert.`
-      : 'Zeit abgelaufen — Schreibfehler sind automatisch korrigiert.';
+      ? `${stopper.name} hat gestoppt — Antworten kontrollieren:`
+      : 'Zeit abgelaufen — Antworten kontrollieren:';
     info.appendChild(base);
     if (stopper && room.stopperBonus) {
       const bonus = document.createElement('span');
@@ -446,7 +446,6 @@
     if (!entry.answer) return 'Keine Antwort';
     if (entry.status === 'wrong-letter') return 'Beginnt nicht mit dem Buchstaben';
     if (entry.status === 'unknown') return 'Nicht im Wörterbuch — per Mehrheit gültig/ungültig';
-    if (entry.status === 'corrected') return 'Schreibfehler erkannt und korrigiert';
     if (entry.status === 'ok') return 'Im Wörterbuch erkannt';
     return '';
   }

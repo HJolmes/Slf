@@ -1,6 +1,6 @@
 {
   "name": "stadt-land-fluss",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Live-Multiplayer Stadt-Land-Fluss für Handy",
   "main": "server.js",
   "scripts": {
