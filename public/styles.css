@@ -1,0 +1,229 @@
+:root {
+  --bg-1: #0f0c29;
+  --bg-2: #302b63;
+  --bg-3: #24243e;
+  --accent: #ffd166;
+  --accent-2: #06d6a0;
+  --danger: #ef476f;
+  --text: #f8f8ff;
+  --muted: #b8b8d4;
+  --card: rgba(255, 255, 255, 0.08);
+  --card-border: rgba(255, 255, 255, 0.12);
+  --input-bg: rgba(255, 255, 255, 0.1);
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color: var(--text);
+  background: linear-gradient(135deg, var(--bg-1), var(--bg-2), var(--bg-3));
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+#app {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 16px;
+  padding-bottom: 80px;
+}
+
+.screen { display: flex; flex-direction: column; gap: 16px; animation: fadeIn .25s ease; }
+.hidden { display: none !important; }
+
+@keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+.hero { text-align: center; padding: 24px 0 8px; }
+.hero h1 {
+  font-size: clamp(2rem, 8vw, 3rem);
+  margin: 0;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.hero h1 span { color: var(--muted); -webkit-text-fill-color: var(--muted); }
+.tagline { color: var(--muted); margin: 6px 0 0; }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 18px;
+  padding: 18px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.card h3 { margin: 0 0 14px; font-size: 1.05rem; display: flex; align-items: center; gap: 8px; }
+
+.field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.field span { font-size: .85rem; color: var(--muted); }
+.field input, .field select {
+  background: var(--input-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  font-size: 1rem;
+  color: var(--text);
+  outline: none;
+  transition: border-color .15s, background .15s;
+  width: 100%;
+}
+.field input:focus { border-color: var(--accent); background: rgba(255,255,255,0.15); }
+.field input::placeholder { color: rgba(255,255,255,0.4); }
+
+#input-code { text-transform: uppercase; letter-spacing: 0.4em; font-size: 1.4rem; text-align: center; font-weight: 700; }
+
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+.tabs { display: flex; gap: 4px; background: rgba(0,0,0,0.25); padding: 4px; border-radius: 12px; margin-bottom: 14px; }
+.tab { flex: 1; background: transparent; border: none; color: var(--muted); padding: 10px; border-radius: 9px; font-weight: 600; cursor: pointer; font-size: .95rem; }
+.tab.active { background: rgba(255,255,255,0.15); color: var(--text); }
+
+.btn {
+  border: none;
+  border-radius: 14px;
+  padding: 14px 18px;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  width: 100%;
+  transition: transform .08s, opacity .15s, background .15s;
+  color: var(--text);
+}
+.btn:active { transform: scale(0.98); }
+.btn.primary { background: linear-gradient(135deg, var(--accent), #ffb86b); color: #1a1a2e; }
+.btn.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn.ghost { background: rgba(255,255,255,0.08); border: 1px solid var(--card-border); }
+.btn.stop { background: linear-gradient(135deg, var(--danger), #ff7e7e); color: #fff; font-size: 1.2rem; padding: 18px; box-shadow: 0 8px 24px rgba(239,71,111,0.35); }
+.btn.big { padding: 16px; font-size: 1.05rem; }
+.btn.small { padding: 8px 12px; font-size: .85rem; width: auto; }
+
+.hint { color: var(--muted); font-size: .85rem; margin: 6px 0; }
+.muted { color: var(--muted); }
+.center { text-align: center; }
+.footnote { color: var(--muted); font-size: .8rem; text-align: center; padding: 12px; }
+
+/* Lobby */
+.lobby-head { text-align: center; padding: 16px 0; }
+.lobby-head .muted { margin: 0; font-size: .85rem; }
+.code { font-size: 3rem; font-weight: 800; letter-spacing: 0.5rem; margin: 4px 0 8px; color: var(--accent); }
+.badge { background: var(--accent-2); color: #003d2b; font-size: .75rem; padding: 2px 8px; border-radius: 999px; font-weight: 700; }
+
+.player-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.player-list li { background: rgba(0,0,0,0.2); padding: 10px 14px; border-radius: 10px; display: flex; align-items: center; gap: 8px; }
+.player-list li .name { flex: 1; font-weight: 600; }
+.player-list li .role { font-size: .75rem; color: var(--accent); font-weight: 700; }
+.player-list li .status { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-2); }
+.player-list li.offline .status { background: #666; }
+.player-list li.offline .name { color: var(--muted); }
+.player-list li .kick { background: transparent; border: none; color: var(--danger); cursor: pointer; font-size: 1rem; padding: 0 6px; }
+
+.pulse { width: 30px; height: 30px; border-radius: 50%; background: var(--accent); margin: 14px auto 4px; animation: pulse 1.4s infinite; }
+@keyframes pulse {
+  0% { transform: scale(0.8); opacity: 0.6; }
+  50% { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(0.8); opacity: 0.6; }
+}
+
+/* Spielbildschirm */
+.play-head { display: flex; justify-content: space-between; align-items: center; }
+.round-info { background: rgba(0,0,0,0.3); padding: 8px 14px; border-radius: 999px; font-weight: 600; font-size: .9rem; }
+.timer { font-size: 1.5rem; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; }
+.timer.warn { color: var(--danger); animation: shake .4s infinite; }
+@keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-2px)} 75%{transform:translateX(2px)} }
+
+.letter-box { text-align: center; padding: 12px; background: var(--card); border: 1px solid var(--card-border); border-radius: 18px; }
+.letter-label { color: var(--muted); font-size: .85rem; letter-spacing: 0.15em; text-transform: uppercase; }
+.letter {
+  font-size: clamp(5rem, 22vw, 8rem);
+  font-weight: 900;
+  line-height: 1;
+  margin: 4px 0;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: pop .5s cubic-bezier(.18,.89,.32,1.28);
+}
+@keyframes pop { 0%{transform:scale(0.3); opacity:0} 100%{transform:scale(1); opacity:1} }
+
+.inline-letter { background: var(--accent); color: #1a1a2e; padding: 0 10px; border-radius: 6px; font-weight: 800; }
+
+#play-form { display: flex; flex-direction: column; gap: 10px; }
+.cat-field { display: flex; flex-direction: column; gap: 4px; }
+.cat-field label { font-size: .8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; padding-left: 4px; font-weight: 700; }
+.cat-field input {
+  background: var(--card);
+  border: 2px solid var(--card-border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  font-size: 1.05rem;
+  color: var(--text);
+  outline: none;
+}
+.cat-field input:focus { border-color: var(--accent); }
+.cat-field input.filled { border-color: var(--accent-2); }
+
+.progress-others { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0; }
+.progress-others .chip { background: rgba(255,255,255,0.08); padding: 4px 10px; border-radius: 999px; font-size: .8rem; display: flex; align-items: center; gap: 6px; }
+.progress-others .chip.done { background: var(--accent-2); color: #003d2b; font-weight: 700; }
+
+/* Auswertung */
+#scoring-list { display: flex; flex-direction: column; gap: 14px; }
+.score-cat { background: var(--card); border: 1px solid var(--card-border); border-radius: 14px; padding: 14px; }
+.score-cat h4 { margin: 0 0 10px; font-size: 1rem; }
+.score-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid rgba(255,255,255,0.06); }
+.score-row:first-of-type { border-top: none; }
+.score-row .name { flex: 0 0 auto; font-size: .85rem; color: var(--muted); min-width: 60px; }
+.score-row .ans { flex: 1; font-weight: 600; word-break: break-word; }
+.score-row.invalid .ans { text-decoration: line-through; color: var(--muted); font-weight: 400; }
+.score-row .empty { color: rgba(255,255,255,0.3); font-style: italic; font-weight: 400; }
+.vote-btn { background: transparent; border: 1px solid var(--card-border); border-radius: 8px; width: 32px; height: 32px; cursor: pointer; color: var(--text); font-size: 1rem; }
+.vote-btn.active.invalid { background: var(--danger); border-color: var(--danger); }
+.vote-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.vote-count { font-size: .7rem; color: var(--muted); min-width: 24px; }
+
+/* Ergebnisse */
+.scoreboard { list-style: none; padding: 0; margin: 12px 0; display: flex; flex-direction: column; gap: 8px; }
+.scoreboard li {
+  background: var(--card); border: 1px solid var(--card-border); border-radius: 14px;
+  padding: 14px 18px; display: flex; align-items: center; gap: 14px; font-size: 1.05rem;
+}
+.scoreboard li .rank { font-weight: 800; color: var(--muted); width: 24px; }
+.scoreboard li .name { flex: 1; font-weight: 600; }
+.scoreboard li .pts { font-weight: 800; color: var(--accent); }
+.scoreboard li.gold { background: linear-gradient(135deg, rgba(255,209,102,0.2), rgba(255,209,102,0.05)); border-color: var(--accent); }
+.scoreboard li.gold .rank { color: var(--accent); }
+.scoreboard li.gold .name::after { content: ' 👑'; }
+
+/* Toast */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(100px);
+  background: rgba(0,0,0,0.85);
+  color: white;
+  padding: 12px 20px;
+  border-radius: 12px;
+  font-size: .9rem;
+  transition: transform .3s;
+  z-index: 100;
+  max-width: 90vw;
+  text-align: center;
+}
+.toast.show { transform: translateX(-50%) translateY(0); }
+
+/* Host/Player Sichtbarkeit (via JS body-Klassen) */
+body:not(.is-host) .host-only { display: none !important; }
+body.is-host .player-only { display: none !important; }
