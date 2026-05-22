@@ -355,6 +355,17 @@
       ? `${stopper.name} hat gestoppt — Antworten kontrollieren:`
       : 'Zeit abgelaufen — Antworten kontrollieren:';
     info.appendChild(base);
+    if (room.wikiPending) {
+      const wiki = document.createElement('span');
+      wiki.className = 'wiki-pending';
+      wiki.textContent = ' 🔍 Wikipedia prüft Antworten…';
+      info.appendChild(wiki);
+    } else if (room.voteThreshold > 1) {
+      const note = document.createElement('div');
+      note.className = 'vote-note';
+      note.textContent = `Anfechtung gilt erst ab ${room.voteThreshold} Stimmen.`;
+      info.appendChild(note);
+    }
     if (stopper && room.stopperBonus) {
       const bonus = document.createElement('span');
       bonus.className = 'stopper-bonus';
@@ -421,22 +432,56 @@
     row.appendChild(verdict);
 
     const pts = document.createElement('span');
-    pts.className = 'points-pill p' + (entry.points || 0);
-    pts.textContent = (entry.points > 0 ? '+' : '') + (entry.points || 0);
+    const baseClass = 'p' + (entry.basePoints || 0);
+    pts.className = 'points-pill ' + baseClass + (entry.creativityBonus ? ' has-bonus' : '');
+    if (entry.creativityBonus) {
+      pts.innerHTML = `<span class="base">+${entry.basePoints || 0}</span><span class="bonus">★+${entry.creativityBonus}</span>`;
+    } else {
+      pts.textContent = (entry.points > 0 ? '+' : '') + (entry.points || 0);
+    }
+    pts.title = entry.creativityBonus ? `${entry.basePoints} Punkte + ${entry.creativityBonus} Kreativ-Bonus` : '';
     row.appendChild(pts);
 
     if (entry.playerId !== state.playerId && entry.answer) {
+      const actions = document.createElement('div');
+      actions.className = 'row-actions';
+
+      // Anfechten-Button (gegen Auto-Bewertung stimmen)
       const overrideBtn = document.createElement('button');
-      overrideBtn.className = 'override-btn';
-      const desired = !entry.valid;
-      overrideBtn.textContent = entry.myVote === null ? 'anfechten' : (entry.myVote === desired ? '↺' : '✓');
-      // Wir senden eine Stimme entgegen der aktuellen Bewertung
-      overrideBtn.title = entry.valid ? 'Als ungültig markieren' : 'Als gültig markieren';
+      const challengingFor = !entry.autoValid; // Stimme, die gegen den Auto-Verdict geht
+      overrideBtn.className = 'override-btn' + (entry.myVote === challengingFor ? ' voted' : '');
+      const challengers = entry.autoValid ? entry.downvotes : entry.upvotes;
+      const tip = entry.autoValid ? 'Als ungültig anfechten' : 'Als gültig anfechten';
+      overrideBtn.title = tip + (entry.voteThreshold > 1 ? ` (${challengers}/${entry.voteThreshold})` : '');
+      overrideBtn.innerHTML = entry.voteThreshold > 1
+        ? `anfechten <span class="vote-count">${challengers}/${entry.voteThreshold}</span>`
+        : 'anfechten';
       overrideBtn.onclick = () => {
-        const newVote = entry.myVote === null ? !entry.autoValid : (entry.myVote === !entry.autoValid ? null : !entry.autoValid);
+        const newVote = entry.myVote === challengingFor ? null : challengingFor;
         socket.emit('vote', { category: cat, targetPlayerId: entry.playerId, valid: newVote });
       };
-      row.appendChild(overrideBtn);
+      actions.appendChild(overrideBtn);
+
+      // Kreativ-Stern-Button
+      const starBtn = document.createElement('button');
+      starBtn.className = 'star-btn' + (entry.myCreativityVote ? ' voted' : '');
+      starBtn.innerHTML = entry.creativityCount > 0
+        ? `★ <span class="vote-count">${entry.creativityCount}</span>`
+        : '★';
+      starBtn.title = 'Für besondere Kreativität abstimmen (+3 Pkt pro Stimme)';
+      starBtn.onclick = () => {
+        socket.emit('creativity-vote', { category: cat, targetPlayerId: entry.playerId });
+      };
+      actions.appendChild(starBtn);
+
+      row.appendChild(actions);
+    } else if (entry.creativityCount > 0) {
+      // Auch für die eigene Antwort zeigen, wenn sie Kreativ-Votes hat
+      const stars = document.createElement('span');
+      stars.className = 'star-display';
+      stars.textContent = `★ ${entry.creativityCount}`;
+      stars.title = `${entry.creativityCount} Mitspieler finden das kreativ`;
+      row.appendChild(stars);
     }
 
     return row;
@@ -445,8 +490,11 @@
   function verdictReason(entry) {
     if (!entry.answer) return 'Keine Antwort';
     if (entry.status === 'wrong-letter') return 'Beginnt nicht mit dem Buchstaben';
-    if (entry.status === 'unknown') return 'Nicht im Wörterbuch — per Mehrheit gültig/ungültig';
     if (entry.status === 'ok') return 'Im Wörterbuch erkannt';
+    if (entry.wikiStatus === 'verified') return 'Existiert laut Wikipedia';
+    if (entry.wikiStatus === 'not-found') return 'Nicht auf Wikipedia gefunden';
+    if (entry.wikiStatus === 'pending') return 'Wikipedia prüft…';
+    if (entry.status === 'unknown') return 'Nicht im Wörterbuch — per Mehrheit anfechtbar';
     return '';
   }
 

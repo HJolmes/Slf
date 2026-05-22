@@ -198,8 +198,33 @@ body {
 .verdict { width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 1rem; flex-shrink: 0; }
 .verdict.ok { background: rgba(6,214,160,0.2); color: var(--accent-2); }
 .verdict.bad { background: rgba(239,71,111,0.2); color: var(--danger); }
-.override-btn { background: transparent; border: 1px solid var(--card-border); border-radius: 8px; height: 30px; padding: 0 10px; cursor: pointer; color: var(--muted); font-size: .75rem; flex-shrink: 0; }
-.override-btn:hover, .override-btn:active { color: var(--text); border-color: var(--accent); }
+.row-actions { display: flex; gap: 4px; flex-shrink: 0; align-items: center; }
+.override-btn, .star-btn {
+  background: transparent;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  height: 30px;
+  padding: 0 8px;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: .75rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.override-btn:hover, .star-btn:hover { color: var(--text); border-color: var(--accent); }
+.override-btn.voted { background: rgba(239,71,111,0.15); border-color: var(--danger); color: var(--text); }
+.star-btn { color: var(--accent); }
+.star-btn.voted { background: rgba(255,209,102,0.2); border-color: var(--accent); color: var(--text); }
+.vote-count { font-variant-numeric: tabular-nums; font-weight: 700; opacity: 0.8; }
+.star-display { color: var(--accent); font-weight: 700; font-size: .85rem; padding-left: 4px; }
+.vote-note { display: block; margin-top: 4px; font-size: .75rem; opacity: 0.7; }
+.wiki-pending { color: var(--accent-2); font-size: .85rem; }
+.points-pill.has-bonus { display: inline-flex; flex-direction: column; align-items: center; padding: 2px 8px; min-width: 50px; line-height: 1.1; }
+.points-pill.has-bonus .base { font-weight: 800; }
+.points-pill.has-bonus .bonus { font-size: .65rem; color: var(--accent); font-weight: 700; }
+.points-pill.has-bonus.p0 .base { color: var(--muted); }
 .points-pill {
   min-width: 38px;
   padding: 4px 8px;
