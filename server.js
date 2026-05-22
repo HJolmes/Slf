@@ -57,15 +57,46 @@ function buildEntry(room, cat, playerId, player, viewerId) {
   };
 }
 
+function computeCategoryPoints(entries) {
+  const valids = entries.filter(e => e.valid && e.answer);
+  const counts = {};
+  for (const e of valids) {
+    const key = (e.normalized || e.answer).toLowerCase();
+    counts[key] = (counts[key] || 0) + 1;
+  }
+  for (const e of entries) {
+    if (!e.valid || !e.answer) {
+      e.points = 0;
+    } else {
+      const key = (e.normalized || e.answer).toLowerCase();
+      if (valids.length === 1) e.points = 20;
+      else if (counts[key] === 1) e.points = 10;
+      else e.points = 5;
+    }
+  }
+  return entries;
+}
+
 function collectAnswers(room, viewerId) {
   const out = {};
   for (const cat of room.categories) {
-    out[cat] = [];
+    const entries = [];
     for (const [pid, p] of room.players.entries()) {
-      out[cat].push(buildEntry(room, cat, pid, p, viewerId));
+      entries.push(buildEntry(room, cat, pid, p, viewerId));
     }
+    computeCategoryPoints(entries);
+    out[cat] = entries;
   }
   return out;
+}
+
+function stopperBonusEligible(room) {
+  if (!room.stopperId || !room.players.has(room.stopperId)) return false;
+  const stopper = room.players.get(room.stopperId);
+  return room.categories.every(cat => {
+    const entry = buildEntry(room, cat, room.stopperId, stopper, null);
+    return entry.valid && entry.answer;
+  });
 }
 
 function publicState(room, viewerId = null) {
@@ -84,6 +115,7 @@ function publicState(room, viewerId = null) {
     countdownEnd: room.countdownEnd || null,
     endTime: room.endTime || null,
     stopperId: room.stopperId || null,
+    stopperBonus: showAnswers ? stopperBonusEligible(room) : false,
     players: Array.from(room.players.entries()).map(([id, p]) => ({
       id,
       name: p.name,
@@ -121,31 +153,18 @@ function stopRound(room, stopperId) {
 
 function computeScores(room) {
   for (const cat of room.categories) {
-    const valids = [];
+    const entries = [];
     for (const [pid, p] of room.players.entries()) {
-      const entry = buildEntry(room, cat, pid, p, null);
-      if (!entry.answer) continue;
-      if (!entry.valid) continue;
-      const key = (entry.normalized || entry.answer).toLowerCase();
-      valids.push({ pid, key });
+      entries.push(buildEntry(room, cat, pid, p, null));
     }
-    const counts = {};
-    for (const v of valids) counts[v.key] = (counts[v.key] || 0) + 1;
-    for (const v of valids) {
-      const p = room.players.get(v.pid);
-      if (!p) continue;
-      if (valids.length === 1) p.score += 20;
-      else if (counts[v.key] === 1) p.score += 10;
-      else p.score += 5;
+    computeCategoryPoints(entries);
+    for (const e of entries) {
+      const p = room.players.get(e.playerId);
+      if (p) p.score += e.points;
     }
   }
-  if (room.stopperId && room.players.has(room.stopperId)) {
-    const stopper = room.players.get(room.stopperId);
-    const allOK = room.categories.every(cat => {
-      const entry = buildEntry(room, cat, room.stopperId, stopper, null);
-      return entry.valid && entry.answer;
-    });
-    if (allOK) stopper.score += 5;
+  if (stopperBonusEligible(room)) {
+    room.players.get(room.stopperId).score += 5;
   }
 }
 

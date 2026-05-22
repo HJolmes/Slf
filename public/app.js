@@ -275,9 +275,19 @@
     $('#score-letter').textContent = room.letter;
 
     const stopper = room.players.find(p => p.id === room.stopperId);
-    $('#score-info').textContent = stopper
-      ? `${stopper.name} hat gestoppt — Schreibfehler sind automatisch korrigiert. Antworten kontrollieren:`
-      : 'Zeit abgelaufen — Schreibfehler sind automatisch korrigiert. Antworten kontrollieren:';
+    const info = $('#score-info');
+    info.innerHTML = '';
+    const base = document.createElement('span');
+    base.textContent = stopper
+      ? `${stopper.name} hat gestoppt — Schreibfehler sind automatisch korrigiert.`
+      : 'Zeit abgelaufen — Schreibfehler sind automatisch korrigiert.';
+    info.appendChild(base);
+    if (stopper && room.stopperBonus) {
+      const bonus = document.createElement('span');
+      bonus.className = 'stopper-bonus';
+      bonus.textContent = `+5 Stopp-Bonus für ${stopper.name}`;
+      info.appendChild(bonus);
+    }
 
     const container = $('#scoring-list');
     container.innerHTML = '';
@@ -336,6 +346,11 @@
     verdict.textContent = entry.valid ? '✓' : '✗';
     verdict.title = verdictReason(entry);
     row.appendChild(verdict);
+
+    const pts = document.createElement('span');
+    pts.className = 'points-pill p' + (entry.points || 0);
+    pts.textContent = (entry.points > 0 ? '+' : '') + (entry.points || 0);
+    row.appendChild(pts);
 
     if (entry.playerId !== state.playerId && entry.answer) {
       const overrideBtn = document.createElement('button');
