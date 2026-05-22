@@ -175,6 +175,7 @@ body {
 }
 .cat-field input:focus { border-color: var(--accent); }
 .cat-field input.filled { border-color: var(--accent-2); }
+.cat-field input.missing:not(:focus) { border-color: rgba(239,71,111,0.35); }
 
 .progress-others { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0; }
 .progress-others .chip { background: rgba(255,255,255,0.08); padding: 4px 10px; border-radius: 999px; font-size: .8rem; display: flex; align-items: center; gap: 6px; }
@@ -276,3 +277,35 @@ body {
 /* Host/Player Sichtbarkeit (via JS body-Klassen) */
 body:not(.is-host) .host-only { display: none !important; }
 body.is-host .player-only { display: none !important; }
+
+/* Versionsanzeige */
+.version-badge {
+  position: fixed;
+  bottom: 6px;
+  right: 8px;
+  font-size: .7rem;
+  color: var(--muted);
+  opacity: 0.5;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  z-index: 50;
+  background: rgba(0,0,0,0.25);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+/* Reconnecting-Overlay */
+body.reconnecting::after {
+  content: 'Verbinde wieder…';
+  position: fixed;
+  inset: 0;
+  background: rgba(15,12,41,0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  font-size: 1.2rem;
+  font-weight: 700;
+  z-index: 200;
+  backdrop-filter: blur(4px);
+}

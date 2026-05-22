@@ -43,7 +43,14 @@
     try {
       const data = JSON.parse(localStorage.getItem('slf-session') || '{}');
       if (data.name) $('#input-name').value = data.name;
-    } catch (e) {}
+      return data;
+    } catch (e) { return {}; }
+  }
+
+  function clearSession() {
+    try { localStorage.removeItem('slf-session'); } catch (e) {}
+    state.code = null;
+    state.playerId = null;
   }
 
   // ---------- Home ----------
@@ -93,7 +100,9 @@
   });
 
   $('#btn-leave').addEventListener('click', () => {
-    socket.disconnect();
+    if (!confirm('Session wirklich verlassen? Dein Platz wird freigegeben.')) return;
+    socket.emit('leave-room');
+    clearSession();
     setTimeout(() => location.reload(), 100);
   });
 
@@ -101,6 +110,11 @@
   $('#btn-stop').addEventListener('click', () => {
     if ($('#btn-stop').disabled) return;
     socket.emit('stop-round');
+  });
+
+  $('#btn-force-stop').addEventListener('click', () => {
+    if (!confirm('Runde als Spielleiter sofort beenden? Alle Antworten werden so wie sie sind ausgewertet.')) return;
+    socket.emit('force-stop-round');
   });
 
   // ---------- Auswertung ----------
@@ -113,15 +127,31 @@
   $('#btn-new-game').addEventListener('click', () => socket.emit('new-game'));
 
   // ---------- Socket-Events ----------
-  socket.on('connect', () => { loadSession(); });
+  socket.on('connect', () => {
+    const saved = loadSession();
+    if (saved && saved.code && saved.name && !state.code) {
+      // Auto-Rejoin nach Reload
+      document.body.classList.add('reconnecting');
+      socket.emit('join-room', { code: saved.code, name: saved.name });
+    }
+  });
 
   socket.on('joined', ({ code, playerId }) => {
     state.code = code;
     state.playerId = playerId;
     saveSession();
+    document.body.classList.remove('reconnecting');
   });
 
-  socket.on('error-message', (msg) => { toast(msg || 'Fehler'); });
+  socket.on('error-message', (msg) => {
+    toast(msg || 'Fehler');
+    if (document.body.classList.contains('reconnecting')) {
+      // Auto-Rejoin fehlgeschlagen -> Sitzung lokal vergessen
+      document.body.classList.remove('reconnecting');
+      clearSession();
+      showScreen('home');
+    }
+  });
 
   socket.on('room-update', (room) => {
     state.room = room;
@@ -227,6 +257,18 @@
       setTimeout(() => form.querySelector('input')?.focus(), 60);
     }
 
+    // Eigene Antworten vom Server zurückspielen (z.B. nach Reload)
+    if (room.myAnswers) {
+      for (const input of $$('#play-form input')) {
+        const cat = input.dataset.cat;
+        const serverVal = room.myAnswers[cat];
+        if (serverVal && !input.value) {
+          input.value = serverVal;
+          input.classList.add('filled');
+        }
+      }
+    }
+
     startTimer(room.endTime);
     updateStopButton();
 
@@ -245,12 +287,17 @@
   function updateStopButton() {
     const inputs = $$('#play-form input');
     if (!inputs.length) return;
-    const allFilled = inputs.every(i => i.value.trim().length > 0);
+    const filled = inputs.filter(i => i.value.trim().length > 0).length;
+    const total = inputs.length;
+    const allFilled = filled === total;
     const btn = $('#btn-stop');
     btn.disabled = !allFilled;
+    btn.textContent = allFilled ? 'STOPP! ✋' : `Noch ${total - filled} offen (${filled}/${total})`;
     $('#stop-hint').textContent = allFilled
       ? 'Du kannst jetzt stoppen — die Runde endet sofort für alle.'
-      : 'Fülle erst alle Kategorien aus — dann kannst du stoppen.';
+      : 'Stopp ist erst möglich, wenn du alle Felder ausgefüllt hast. Der Timer beendet sonst automatisch.';
+    // Leere Felder hervorheben
+    inputs.forEach(i => i.classList.toggle('missing', i.value.trim().length === 0));
   }
 
   function startTimer(endTime) {
@@ -406,4 +453,9 @@
   }
 
   loadSession();
+
+  // Version anzeigen — vom Server holen, damit Cache-Probleme sichtbar werden
+  fetch('/version').then(r => r.json()).then(d => {
+    if (d && d.version) $('#version-badge').textContent = 'v' + d.version;
+  }).catch(() => {});
 })();

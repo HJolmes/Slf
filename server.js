@@ -3,6 +3,7 @@ const http = require('http');
 const path = require('path');
 const { Server } = require('socket.io');
 const { validateAnswer, normalizeLetter } = require('./lib/validate');
+const pkg = require('./package.json');
 
 const app = express();
 const server = http.createServer(app);
@@ -10,11 +11,16 @@ const io = new Server(server, { cors: { origin: '*' } });
 
 app.use(express.static(path.join(__dirname, 'public')));
 
+app.get('/version', (_req, res) => {
+  res.json({ version: pkg.version });
+});
+
 const rooms = new Map();
 
 const DEFAULT_CATEGORIES = ['Stadt', 'Land', 'Fluss', 'Name', 'Tier', 'Beruf'];
 const ALPHABET = 'ABCDEFGHIJKLMNOPRSTUVW'.split(''); // Q/X/Y/Z ausgelassen (zu schwer)
 const COUNTDOWN_MS = 5000;
+const DISCONNECT_GRACE_MS = 90_000; // 90s Karenz für Reload/Reconnect
 
 function generateRoomCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -101,6 +107,7 @@ function stopperBonusEligible(room) {
 
 function publicState(room, viewerId = null) {
   const showAnswers = room.state === 'scoring' || room.state === 'roundResults' || room.state === 'gameOver';
+  const viewer = viewerId ? room.players.get(viewerId) : null;
   return {
     code: room.code,
     hostId: room.hostId,
@@ -124,7 +131,8 @@ function publicState(room, viewerId = null) {
       connected: p.connected,
       answersFilled: Object.values(p.answers || {}).filter(a => (a || '').trim()).length
     })),
-    answers: showAnswers ? collectAnswers(room, viewerId) : null
+    answers: showAnswers ? collectAnswers(room, viewerId) : null,
+    myAnswers: viewer && room.state === 'playing' ? { ...(viewer.answers || {}) } : null
   };
 }
 
@@ -142,8 +150,6 @@ function pickLetter(room) {
 }
 
 function stopRound(room, stopperId) {
-  if (room.timer) { clearTimeout(room.timer); room.timer = null; }
-  if (room.countdownTimer) { clearTimeout(room.countdownTimer); room.countdownTimer = null; }
   room.state = 'scoring';
   room.stopperId = stopperId;
   room.endTime = null;
@@ -179,19 +185,23 @@ function beginCountdown(room) {
   room.votes = {};
   for (const p of room.players.values()) { p.answers = {}; }
   broadcast(room);
-
-  if (room.countdownTimer) clearTimeout(room.countdownTimer);
-  room.countdownTimer = setTimeout(() => {
-    if (room.state !== 'countdown') return;
-    room.state = 'playing';
-    broadcast(room);
-  }, COUNTDOWN_MS);
-
-  if (room.timer) clearTimeout(room.timer);
-  room.timer = setTimeout(() => {
-    if (room.state === 'playing') stopRound(room, null);
-  }, COUNTDOWN_MS + room.roundDuration * 1000);
 }
+
+// Globaler Tick: prüft alle Räume regelmäßig auf Phasenwechsel.
+// Robuster als per-Raum setTimeout (das auf Hosting-Plattformen mit
+// Suspend/GC-Pausen unzuverlässig sein kann).
+const TICK_MS = 500;
+setInterval(() => {
+  const now = Date.now();
+  for (const room of rooms.values()) {
+    if (room.state === 'countdown' && room.countdownEnd && now >= room.countdownEnd) {
+      room.state = 'playing';
+      broadcast(room);
+    } else if (room.state === 'playing' && room.endTime && now >= room.endTime) {
+      stopRound(room, null);
+    }
+  }
+}, TICK_MS);
 
 io.on('connection', (socket) => {
 
@@ -234,6 +244,7 @@ io.on('connection', (socket) => {
     let playerId = null;
     for (const [pid, p] of room.players.entries()) {
       if (!p.connected && p.name.toLowerCase() === cleanName.toLowerCase()) {
+        if (p.removeTimer) { clearTimeout(p.removeTimer); p.removeTimer = null; }
         p.connected = true;
         p.socketId = socket.id;
         room.players.delete(pid);
@@ -281,6 +292,13 @@ io.on('connection', (socket) => {
     const player = room.players.get(socket.id);
     if (!player) return;
     player.answers[category] = (value || '').slice(0, 60);
+  });
+
+  socket.on('force-stop-round', () => {
+    const room = rooms.get(socket.data.roomCode);
+    if (!room || room.hostId !== socket.id) return;
+    if (room.state !== 'playing' && room.state !== 'countdown') return;
+    stopRound(room, null);
   });
 
   socket.on('stop-round', () => {
@@ -336,6 +354,27 @@ io.on('connection', (socket) => {
     broadcast(room);
   });
 
+  socket.on('leave-room', () => {
+    const room = rooms.get(socket.data.roomCode);
+    if (!room) return;
+    const player = room.players.get(socket.id);
+    if (player) {
+      if (player.removeTimer) clearTimeout(player.removeTimer);
+      room.players.delete(socket.id);
+      socket.leave(room.code);
+      socket.data.roomCode = null;
+      if (room.players.size === 0) {
+        rooms.delete(room.code);
+      } else {
+        if (socket.id === room.hostId) {
+          const next = Array.from(room.players.entries()).find(([, p]) => p.connected);
+          if (next) room.hostId = next[0];
+        }
+        broadcast(room);
+      }
+    }
+  });
+
   socket.on('kick-player', ({ playerId }) => {
     const room = rooms.get(socket.data.roomCode);
     if (!room || room.hostId !== socket.id) return;
@@ -357,22 +396,37 @@ io.on('connection', (socket) => {
     const room = rooms.get(code);
     if (!room) return;
     const player = room.players.get(socket.id);
-    if (player) player.connected = false;
+    if (!player) return;
+    player.connected = false;
 
     if (socket.id === room.hostId) {
       const next = Array.from(room.players.entries()).find(([id, p]) => id !== socket.id && p.connected);
       if (next) room.hostId = next[0];
     }
 
-    if (room.state === 'lobby') room.players.delete(socket.id);
+    // Karenzzeit: erst nach DISCONNECT_GRACE_MS endgültig entfernen
+    if (player.removeTimer) clearTimeout(player.removeTimer);
+    player.removeTimer = setTimeout(() => {
+      if (player.connected) return;
+      for (const [pid, p] of room.players.entries()) {
+        if (p === player) {
+          room.players.delete(pid);
+          break;
+        }
+      }
+      if (room.players.size === 0) {
+        rooms.delete(code);
+      } else {
+        // Falls Host weg ist und ein anderer übernimmt
+        const stillHost = Array.from(room.players.entries()).find(([id]) => id === room.hostId);
+        if (!stillHost) {
+          const next = Array.from(room.players.entries()).find(([, p]) => p.connected) || Array.from(room.players.entries())[0];
+          if (next) room.hostId = next[0];
+        }
+        broadcast(room);
+      }
+    }, DISCONNECT_GRACE_MS);
 
-    const anyConnected = Array.from(room.players.values()).some(p => p.connected);
-    if (!anyConnected) {
-      if (room.timer) clearTimeout(room.timer);
-      if (room.countdownTimer) clearTimeout(room.countdownTimer);
-      rooms.delete(code);
-      return;
-    }
     broadcast(room);
   });
 });
