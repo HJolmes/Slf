@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#1e1b4b" />
+  <title>Stadt · Land · Fluss</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="app">
+
+    <!-- Start-Bildschirm -->
+    <section class="screen" id="screen-home">
+      <div class="hero">
+        <h1>Stadt<span>·</span>Land<span>·</span>Fluss</h1>
+        <p class="tagline">Live mit Freunden auf dem Handy spielen</p>
+      </div>
+
+      <div class="card">
+        <label class="field">
+          <span>Dein Name</span>
+          <input id="input-name" type="text" maxlength="24" placeholder="z. B. Anna" autocomplete="given-name" />
+        </label>
+
+        <div class="tabs" role="tablist">
+          <button class="tab active" data-tab="join" role="tab">Beitreten</button>
+          <button class="tab" data-tab="create" role="tab">Neue Session</button>
+        </div>
+
+        <div class="tab-panel" id="tab-join">
+          <label class="field">
+            <span>Session-Code</span>
+            <input id="input-code" type="text" maxlength="6" placeholder="ABCD" autocapitalize="characters" autocomplete="off" />
+          </label>
+          <button class="btn primary" id="btn-join">Spiel betreten</button>
+        </div>
+
+        <div class="tab-panel hidden" id="tab-create">
+          <p class="hint">Du wirst zum Spielleiter und kannst Kategorien, Rundenzeit und Anzahl Runden festlegen.</p>
+          <button class="btn primary" id="btn-create">Session erstellen</button>
+        </div>
+      </div>
+
+      <p class="footnote">Tipp: Öffne das Spiel auf jedem Handy im selben Browser. Eine Person erstellt die Session, alle anderen treten mit dem Code bei.</p>
+    </section>
+
+    <!-- Lobby -->
+    <section class="screen hidden" id="screen-lobby">
+      <div class="lobby-head">
+        <p class="muted">Session-Code</p>
+        <h2 class="code" id="lobby-code">----</h2>
+        <button class="btn ghost small" id="btn-copy">Code kopieren</button>
+      </div>
+
+      <div class="card">
+        <h3>Mitspieler <span class="badge" id="player-count">0</span></h3>
+        <ul class="player-list" id="lobby-players"></ul>
+      </div>
+
+      <div class="card host-only">
+        <h3>Einstellungen</h3>
+        <div class="row">
+          <label class="field"><span>Runden</span>
+            <input id="setting-rounds" type="number" min="1" max="20" value="5" />
+          </label>
+          <label class="field"><span>Zeit pro Runde (s)</span>
+            <input id="setting-duration" type="number" min="15" max="300" step="15" value="90" />
+          </label>
+        </div>
+        <label class="field">
+          <span>Kategorien (Komma-getrennt)</span>
+          <input id="setting-categories" type="text" placeholder="Stadt, Land, Fluss, Name, Tier, Beruf" />
+        </label>
+        <button class="btn primary big" id="btn-start">▶ Spiel starten</button>
+      </div>
+
+      <div class="card player-only">
+        <p class="muted center">Warte, bis der Spielleiter das Spiel startet…</p>
+        <div class="pulse"></div>
+      </div>
+
+      <button class="btn ghost" id="btn-leave">Session verlassen</button>
+    </section>
+
+    <!-- Spielbildschirm -->
+    <section class="screen hidden" id="screen-play">
+      <div class="play-head">
+        <div class="round-info">
+          Runde <span id="play-round">1</span> / <span id="play-total">5</span>
+        </div>
+        <div class="timer" id="play-timer">--</div>
+      </div>
+
+      <div class="letter-box">
+        <span class="letter-label">Buchstabe</span>
+        <div class="letter" id="play-letter">?</div>
+      </div>
+
+      <form id="play-form" autocomplete="off"></form>
+
+      <div class="progress-others" id="play-progress"></div>
+
+      <button class="btn stop big" id="btn-stop">STOPP! ✋</button>
+      <p class="hint center">Drücke „Stopp", sobald du fertig bist — die Runde endet sofort für alle.</p>
+    </section>
+
+    <!-- Auswertung / Voting -->
+    <section class="screen hidden" id="screen-scoring">
+      <div class="play-head">
+        <h2>Runde <span id="score-round">1</span> — Buchstabe <span class="inline-letter" id="score-letter">?</span></h2>
+      </div>
+      <p class="muted center" id="score-info"></p>
+
+      <div id="scoring-list"></div>
+
+      <button class="btn primary big host-only" id="btn-finish-scoring">Punkte berechnen</button>
+      <p class="hint center player-only">Warte auf den Spielleiter…</p>
+    </section>
+
+    <!-- Rundenergebnis / Endbildschirm -->
+    <section class="screen hidden" id="screen-results">
+      <h2 id="results-title">Zwischenstand</h2>
+      <ol class="scoreboard" id="results-board"></ol>
+      <button class="btn primary big host-only" id="btn-next-round">Nächste Runde ▶</button>
+      <button class="btn ghost host-only" id="btn-new-game">Neues Spiel starten</button>
+      <p class="hint center player-only">Der Spielleiter startet die nächste Runde…</p>
+    </section>
+
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
