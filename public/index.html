@@ -83,6 +83,15 @@
       <button class="btn ghost" id="btn-leave">Session verlassen</button>
     </section>
 
+    <!-- Countdown vor Rundenstart -->
+    <section class="screen hidden" id="screen-countdown">
+      <div class="countdown-wrap">
+        <p class="muted center">Macht euch bereit…</p>
+        <div class="countdown-number" id="countdown-num">5</div>
+        <p class="muted center">Runde <span id="cd-round">1</span> / <span id="cd-total">5</span></p>
+      </div>
+    </section>
+
     <!-- Spielbildschirm -->
     <section class="screen hidden" id="screen-play">
       <div class="play-head">
@@ -101,8 +110,8 @@
 
       <div class="progress-others" id="play-progress"></div>
 
-      <button class="btn stop big" id="btn-stop">STOPP! ✋</button>
-      <p class="hint center">Drücke „Stopp", sobald du fertig bist — die Runde endet sofort für alle.</p>
+      <button class="btn stop big" id="btn-stop" disabled>STOPP! ✋</button>
+      <p class="hint center" id="stop-hint">Fülle erst alle Kategorien aus — dann kannst du stoppen.</p>
     </section>
 
     <!-- Auswertung / Voting -->
