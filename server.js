@@ -3,6 +3,7 @@ const http = require('http');
 const path = require('path');
 const { Server } = require('socket.io');
 const { validateAnswer, normalizeLetter } = require('./lib/validate');
+const { checkWikipediaExists } = require('./lib/wiki');
 const pkg = require('./package.json');
 
 const app = express();
@@ -38,17 +39,44 @@ function buildEntry(room, cat, playerId, player, viewerId) {
   const rawAnswer = (player.answers[cat] || '').trim();
   const result = validateAnswer(cat, room.letter, rawAnswer);
 
+  // Wikipedia-Existenz für 'unknown'-Antworten — Cache pro Raum
+  let wikiStatus = null; // 'verified' | 'not-found' | 'pending' | null
+  if (result.status === 'unknown' && rawAnswer) {
+    const cached = room.wikiResults?.[rawAnswer.toLowerCase()];
+    if (cached === true) wikiStatus = 'verified';
+    else if (cached === false) wikiStatus = 'not-found';
+    else if (cached === 'pending') wikiStatus = 'pending';
+  }
+
+  // Auto-Bewertung
+  // 'ok' (lokales Wörterbuch) -> immer gültig
+  // 'unknown' + Wikipedia-bestätigt -> gültig
+  // 'unknown' + Wikipedia-nicht-gefunden -> ungültig
+  // 'unknown' + ohne Wiki-Antwort (Timeout/Pending) -> gültig (gnädig)
+  // 'wrong-letter' / 'empty' -> ungültig
+  let autoValid;
+  if (result.status === 'ok') autoValid = true;
+  else if (result.status === 'unknown') {
+    if (wikiStatus === 'not-found') autoValid = false;
+    else autoValid = true;
+  } else autoValid = false;
+
+  // Stimmen-Override: braucht mindestens die Hälfte aller Spieler (aufgerundet)
   const voterMap = room.votes[cat]?.[playerId] || {};
   const voters = Object.values(voterMap);
   const truthy = voters.filter(v => v === true).length;
   const falsy = voters.filter(v => v === false).length;
 
-  const autoValid = result.status === 'ok' || result.status === 'corrected' || result.status === 'unknown';
-  let finalValid;
-  if (voters.length === 0) finalValid = autoValid;
-  else if (truthy > falsy) finalValid = true;
-  else if (falsy > truthy) finalValid = false;
-  else finalValid = autoValid;
+  const totalPlayers = room.players.size;
+  const threshold = Math.max(1, Math.ceil(totalPlayers / 2));
+
+  let finalValid = autoValid;
+  if (falsy >= threshold) finalValid = false;
+  else if (truthy >= threshold) finalValid = true;
+
+  // Kreativitäts-Stimmen (Set von Voter-IDs)
+  const creativitySet = room.creativityVotes?.[cat]?.[playerId];
+  const creativityCount = creativitySet ? creativitySet.size : 0;
 
   return {
     playerId,
@@ -57,11 +85,15 @@ function buildEntry(room, cat, playerId, player, viewerId) {
     normalized: result.normalized,
     corrected: result.corrected,
     status: result.status,
+    wikiStatus,
     autoValid,
     valid: finalValid,
     upvotes: truthy,
     downvotes: falsy,
-    myVote: viewerId ? (voterMap[viewerId] ?? null) : null
+    voteThreshold: threshold,
+    creativityCount,
+    myVote: viewerId ? (voterMap[viewerId] ?? null) : null,
+    myCreativityVote: viewerId && creativitySet ? creativitySet.has(viewerId) : false
   };
 }
 
@@ -73,14 +105,17 @@ function computeCategoryPoints(entries) {
     counts[key] = (counts[key] || 0) + 1;
   }
   for (const e of entries) {
-    if (!e.valid || !e.answer) {
-      e.points = 0;
-    } else {
+    let basePoints = 0;
+    if (e.valid && e.answer) {
       const key = (e.normalized || e.answer).toLowerCase();
-      if (valids.length === 1) e.points = 20;
-      else if (counts[key] === 1) e.points = 10;
-      else e.points = 5;
+      if (valids.length === 1) basePoints = 20;
+      else if (counts[key] === 1) basePoints = 10;
+      else basePoints = 5;
     }
+    const creativityBonus = (e.creativityCount || 0) * 3;
+    e.basePoints = basePoints;
+    e.creativityBonus = creativityBonus;
+    e.points = basePoints + creativityBonus;
   }
   return entries;
 }
@@ -126,6 +161,8 @@ function publicState(room, viewerId = null) {
     endTime: room.endTime || null,
     stopperId: room.stopperId || null,
     stopperBonus: showAnswers ? stopperBonusEligible(room) : false,
+    wikiPending: !!room.wikiPending,
+    voteThreshold: Math.max(1, Math.ceil(room.players.size / 2)),
     players: Array.from(room.players.entries()).map(([id, p]) => ({
       id,
       name: p.name,
@@ -152,11 +189,42 @@ function pickLetter(room) {
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
-function stopRound(room, stopperId) {
+async function stopRound(room, stopperId) {
+  if (room.state !== 'playing' && room.state !== 'countdown') return;
   room.state = 'scoring';
   room.stopperId = stopperId;
   room.endTime = null;
   room.countdownEnd = null;
+  room.wikiPending = true;
+  if (!room.wikiResults) room.wikiResults = {};
+  broadcast(room);
+
+  // Alle unbekannten Antworten parallel via Wikipedia prüfen
+  const toCheck = new Set();
+  for (const cat of room.categories) {
+    for (const p of room.players.values()) {
+      const ans = (p.answers[cat] || '').trim();
+      if (!ans) continue;
+      const validation = validateAnswer(cat, room.letter, ans);
+      if (validation.status !== 'unknown') continue;
+      const key = ans.toLowerCase();
+      if (room.wikiResults[key] === true || room.wikiResults[key] === false) continue;
+      toCheck.add(ans);
+      room.wikiResults[key] = 'pending';
+    }
+  }
+
+  if (toCheck.size > 0) {
+    await Promise.allSettled(Array.from(toCheck).map(async (term) => {
+      const exists = await checkWikipediaExists(term);
+      const key = term.toLowerCase();
+      if (exists === true) room.wikiResults[key] = true;
+      else if (exists === false) room.wikiResults[key] = false;
+      else delete room.wikiResults[key]; // unknown -> gnädiger Default
+    }));
+  }
+
+  room.wikiPending = false;
   broadcast(room);
 }
 
@@ -186,6 +254,9 @@ function beginCountdown(room) {
   room.endTime = room.countdownEnd + room.roundDuration * 1000;
   room.stopperId = null;
   room.votes = {};
+  room.creativityVotes = {};
+  room.wikiResults = {};
+  room.wikiPending = false;
   for (const p of room.players.values()) { p.answers = {}; }
   broadcast(room);
 }
@@ -325,6 +396,23 @@ io.on('connection', (socket) => {
     stopRound(room, socket.id);
   });
 
+  socket.on('creativity-vote', ({ category, targetPlayerId }) => {
+    const room = rooms.get(socket.data.roomCode);
+    if (!room || room.state !== 'scoring') return;
+    if (!room.players.has(socket.id)) return;
+    if (socket.id === targetPlayerId) return;
+    if (!room.categories.includes(category)) return;
+    if (!room.creativityVotes) room.creativityVotes = {};
+    if (!room.creativityVotes[category]) room.creativityVotes[category] = {};
+    if (!room.creativityVotes[category][targetPlayerId]) {
+      room.creativityVotes[category][targetPlayerId] = new Set();
+    }
+    const set = room.creativityVotes[category][targetPlayerId];
+    if (set.has(socket.id)) set.delete(socket.id);
+    else set.add(socket.id);
+    broadcast(room);
+  });
+
   socket.on('vote', ({ category, targetPlayerId, valid }) => {
     const room = rooms.get(socket.data.roomCode);
     if (!room || room.state !== 'scoring') return;
@@ -357,6 +445,9 @@ io.on('connection', (socket) => {
     room.usedLetters = [];
     room.letter = null;
     room.votes = {};
+    room.creativityVotes = {};
+    room.wikiResults = {};
+    room.wikiPending = false;
     room.stopperId = null;
     for (const p of room.players.values()) { p.score = 0; p.answers = {}; }
     broadcast(room);
