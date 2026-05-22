@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const path = require('path');
 const { Server } = require('socket.io');
+const { validateAnswer, normalizeLetter } = require('./lib/validate');
 
 const app = express();
 const server = http.createServer(app);
@@ -12,7 +13,8 @@ app.use(express.static(path.join(__dirname, 'public')));
 const rooms = new Map();
 
 const DEFAULT_CATEGORIES = ['Stadt', 'Land', 'Fluss', 'Name', 'Tier', 'Beruf'];
-const ALPHABET = 'ABCDEFGHIJKLMNOPRSTUVW'.split(''); // X, Y, Z, Q ausgelassen (zu schwer)
+const ALPHABET = 'ABCDEFGHIJKLMNOPRSTUVW'.split(''); // Q/X/Y/Z ausgelassen (zu schwer)
+const COUNTDOWN_MS = 5000;
 
 function generateRoomCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -24,49 +26,62 @@ function generateRoomCode() {
   return code;
 }
 
-function collectAnswers(room) {
-  const result = {};
+function buildEntry(room, cat, playerId, player, viewerId) {
+  const rawAnswer = (player.answers[cat] || '').trim();
+  const result = validateAnswer(cat, room.letter, rawAnswer);
+
+  const voterMap = room.votes[cat]?.[playerId] || {};
+  const voters = Object.values(voterMap);
+  const truthy = voters.filter(v => v === true).length;
+  const falsy = voters.filter(v => v === false).length;
+
+  const autoValid = result.status === 'ok' || result.status === 'corrected' || result.status === 'unknown';
+  let finalValid;
+  if (voters.length === 0) finalValid = autoValid;
+  else if (truthy > falsy) finalValid = true;
+  else if (falsy > truthy) finalValid = false;
+  else finalValid = autoValid;
+
+  return {
+    playerId,
+    name: player.name,
+    answer: rawAnswer,
+    normalized: result.normalized,
+    corrected: result.corrected,
+    status: result.status,
+    autoValid,
+    valid: finalValid,
+    upvotes: truthy,
+    downvotes: falsy,
+    myVote: viewerId ? (voterMap[viewerId] ?? null) : null
+  };
+}
+
+function collectAnswers(room, viewerId) {
+  const out = {};
   for (const cat of room.categories) {
-    result[cat] = [];
+    out[cat] = [];
     for (const [pid, p] of room.players.entries()) {
-      const ans = (p.answers[cat] || '').trim();
-      const votes = room.votes[cat]?.[pid] || {};
-      const downvotes = Object.values(votes).filter(v => v === false).length;
-      const totalVoters = Math.max(1, room.players.size - 1);
-      const invalid = downvotes > totalVoters / 2;
-      result[cat].push({
-        playerId: pid,
-        name: p.name,
-        answer: ans,
-        valid: !invalid,
-        downvotes,
-        myVote: null
-      });
+      out[cat].push(buildEntry(room, cat, pid, p, viewerId));
     }
   }
-  return result;
+  return out;
 }
 
 function publicState(room, viewerId = null) {
-  const answers = (room.state === 'scoring' || room.state === 'roundResults' || room.state === 'gameOver')
-    ? collectAnswers(room) : null;
-  if (answers && viewerId) {
-    for (const cat of Object.keys(answers)) {
-      for (const entry of answers[cat]) {
-        entry.myVote = room.votes[cat]?.[entry.playerId]?.[viewerId] ?? null;
-      }
-    }
-  }
+  const showAnswers = room.state === 'scoring' || room.state === 'roundResults' || room.state === 'gameOver';
   return {
     code: room.code,
     hostId: room.hostId,
     state: room.state,
-    letter: room.letter,
+    letter: room.state === 'countdown' ? null : room.letter, // im Countdown noch geheim
+    revealLetter: room.state === 'countdown' ? false : !!room.letter,
     categories: room.categories,
     currentRound: room.currentRound,
     totalRounds: room.totalRounds,
     roundDuration: room.roundDuration,
     usedLetters: room.usedLetters,
+    countdownEnd: room.countdownEnd || null,
     endTime: room.endTime || null,
     stopperId: room.stopperId || null,
     players: Array.from(room.players.entries()).map(([id, p]) => ({
@@ -75,10 +90,9 @@ function publicState(room, viewerId = null) {
       score: p.score,
       isHost: id === room.hostId,
       connected: p.connected,
-      done: !!p.done,
       answersFilled: Object.values(p.answers || {}).filter(a => (a || '').trim()).length
     })),
-    answers
+    answers: showAnswers ? collectAnswers(room, viewerId) : null
   };
 }
 
@@ -97,9 +111,11 @@ function pickLetter(room) {
 
 function stopRound(room, stopperId) {
   if (room.timer) { clearTimeout(room.timer); room.timer = null; }
+  if (room.countdownTimer) { clearTimeout(room.countdownTimer); room.countdownTimer = null; }
   room.state = 'scoring';
   room.stopperId = stopperId;
   room.endTime = null;
+  room.countdownEnd = null;
   broadcast(room);
 }
 
@@ -107,32 +123,55 @@ function computeScores(room) {
   for (const cat of room.categories) {
     const valids = [];
     for (const [pid, p] of room.players.entries()) {
-      const ans = (p.answers[cat] || '').trim();
-      const votes = room.votes[cat]?.[pid] || {};
-      const downvotes = Object.values(votes).filter(v => v === false).length;
-      const totalVoters = Math.max(1, room.players.size - 1);
-      const invalid = downvotes > totalVoters / 2;
-      const startsRight = ans && ans.charAt(0).toUpperCase() === room.letter;
-      if (ans && !invalid && startsRight) valids.push({ pid, key: ans.toLowerCase() });
+      const entry = buildEntry(room, cat, pid, p, null);
+      if (!entry.answer) continue;
+      if (!entry.valid) continue;
+      const key = (entry.normalized || entry.answer).toLowerCase();
+      valids.push({ pid, key });
     }
     const counts = {};
     for (const v of valids) counts[v.key] = (counts[v.key] || 0) + 1;
     for (const v of valids) {
       const p = room.players.get(v.pid);
+      if (!p) continue;
       if (valids.length === 1) p.score += 20;
       else if (counts[v.key] === 1) p.score += 10;
       else p.score += 5;
     }
   }
-  // Bonus für den Stopper, wenn alle Antworten gültig
   if (room.stopperId && room.players.has(room.stopperId)) {
     const stopper = room.players.get(room.stopperId);
-    const allFilled = room.categories.every(c => {
-      const ans = (stopper.answers[c] || '').trim();
-      return ans && ans.charAt(0).toUpperCase() === room.letter;
+    const allOK = room.categories.every(cat => {
+      const entry = buildEntry(room, cat, room.stopperId, stopper, null);
+      return entry.valid && entry.answer;
     });
-    if (allFilled) stopper.score += 5;
+    if (allOK) stopper.score += 5;
   }
+}
+
+function beginCountdown(room) {
+  room.letter = pickLetter(room);
+  room.usedLetters.push(room.letter);
+  room.currentRound++;
+  room.state = 'countdown';
+  room.countdownEnd = Date.now() + COUNTDOWN_MS;
+  room.endTime = room.countdownEnd + room.roundDuration * 1000;
+  room.stopperId = null;
+  room.votes = {};
+  for (const p of room.players.values()) { p.answers = {}; }
+  broadcast(room);
+
+  if (room.countdownTimer) clearTimeout(room.countdownTimer);
+  room.countdownTimer = setTimeout(() => {
+    if (room.state !== 'countdown') return;
+    room.state = 'playing';
+    broadcast(room);
+  }, COUNTDOWN_MS);
+
+  if (room.timer) clearTimeout(room.timer);
+  room.timer = setTimeout(() => {
+    if (room.state === 'playing') stopRound(room, null);
+  }, COUNTDOWN_MS + room.roundDuration * 1000);
 }
 
 io.on('connection', (socket) => {
@@ -152,11 +191,12 @@ io.on('connection', (socket) => {
       totalRounds: Math.max(1, Math.min(20, parseInt(totalRounds) || 5)),
       roundDuration: Math.max(15, Math.min(300, parseInt(roundDuration) || 90)),
       votes: {},
-      timer: null
+      timer: null,
+      countdownTimer: null
     };
     if (!room.categories.length) room.categories = DEFAULT_CATEGORIES.slice();
     room.players.set(socket.id, {
-      socketId: socket.id, name: (name || 'Spielleiter').slice(0, 24), score: 0, answers: {}, connected: true, done: false
+      socketId: socket.id, name: (name || 'Spielleiter').slice(0, 24), score: 0, answers: {}, connected: true
     });
     rooms.set(code, room);
     socket.join(code);
@@ -172,14 +212,11 @@ io.on('connection', (socket) => {
     if (!room) return socket.emit('error-message', 'Session nicht gefunden.');
     const cleanName = (name || 'Spieler').slice(0, 24);
 
-    // Reconnect: gleicher Name => alten Slot übernehmen
     let playerId = null;
     for (const [pid, p] of room.players.entries()) {
       if (!p.connected && p.name.toLowerCase() === cleanName.toLowerCase()) {
-        playerId = pid;
         p.connected = true;
         p.socketId = socket.id;
-        // Re-key map with new socket id
         room.players.delete(pid);
         room.players.set(socket.id, p);
         if (room.hostId === pid) room.hostId = socket.id;
@@ -188,12 +225,9 @@ io.on('connection', (socket) => {
       }
     }
     if (!playerId) {
-      if (room.state !== 'lobby') {
-        // Erlaubt Beitritt mitten im Spiel als Zuschauer
-      }
       playerId = socket.id;
       room.players.set(socket.id, {
-        socketId: socket.id, name: cleanName, score: 0, answers: {}, connected: true, done: false
+        socketId: socket.id, name: cleanName, score: 0, answers: {}, connected: true
       });
     }
     socket.join(code);
@@ -219,18 +253,7 @@ io.on('connection', (socket) => {
     const room = rooms.get(socket.data.roomCode);
     if (!room || room.hostId !== socket.id) return;
     if (room.state !== 'lobby' && room.state !== 'roundResults') return;
-    room.letter = pickLetter(room);
-    room.usedLetters.push(room.letter);
-    room.currentRound++;
-    room.state = 'playing';
-    room.endTime = Date.now() + room.roundDuration * 1000;
-    room.stopperId = null;
-    room.votes = {};
-    for (const p of room.players.values()) { p.answers = {}; p.done = false; }
-    broadcast(room);
-    room.timer = setTimeout(() => {
-      if (room.state === 'playing') stopRound(room, null);
-    }, room.roundDuration * 1000);
+    beginCountdown(room);
   });
 
   socket.on('update-answer', ({ category, value }) => {
@@ -244,6 +267,16 @@ io.on('connection', (socket) => {
   socket.on('stop-round', () => {
     const room = rooms.get(socket.data.roomCode);
     if (!room || room.state !== 'playing' || !room.players.has(socket.id)) return;
+    // Server-Sicherheit: nur erlauben, wenn der Stopper alle Kategorien ausgefüllt hat
+    const player = room.players.get(socket.id);
+    const allFilled = room.categories.every(cat => {
+      const v = (player.answers[cat] || '').trim();
+      return v.length > 0;
+    });
+    if (!allFilled) {
+      socket.emit('error-message', 'Du musst zuerst alle Kategorien ausfüllen.');
+      return;
+    }
     stopRound(room, socket.id);
   });
 
@@ -251,12 +284,15 @@ io.on('connection', (socket) => {
     const room = rooms.get(socket.data.roomCode);
     if (!room || room.state !== 'scoring') return;
     if (!room.players.has(socket.id)) return;
-    if (socket.id === targetPlayerId) return; // nicht für sich selbst
+    if (socket.id === targetPlayerId) return;
     if (!room.categories.includes(category)) return;
     if (!room.votes[category]) room.votes[category] = {};
     if (!room.votes[category][targetPlayerId]) room.votes[category][targetPlayerId] = {};
-    if (valid === null) delete room.votes[category][targetPlayerId][socket.id];
-    else room.votes[category][targetPlayerId][socket.id] = !!valid;
+    if (valid === null || valid === undefined) {
+      delete room.votes[category][targetPlayerId][socket.id];
+    } else {
+      room.votes[category][targetPlayerId][socket.id] = !!valid;
+    }
     broadcast(room);
   });
 
@@ -277,7 +313,7 @@ io.on('connection', (socket) => {
     room.letter = null;
     room.votes = {};
     room.stopperId = null;
-    for (const p of room.players.values()) { p.score = 0; p.answers = {}; p.done = false; }
+    for (const p of room.players.values()) { p.score = 0; p.answers = {}; }
     broadcast(room);
   });
 
@@ -314,6 +350,7 @@ io.on('connection', (socket) => {
     const anyConnected = Array.from(room.players.values()).some(p => p.connected);
     if (!anyConnected) {
       if (room.timer) clearTimeout(room.timer);
+      if (room.countdownTimer) clearTimeout(room.countdownTimer);
       rooms.delete(code);
       return;
     }

@@ -10,10 +10,10 @@
     code: null,
     room: null,
     timerHandle: null,
-    lastLetter: null
+    countdownHandle: null,
+    lastFormSig: null
   };
 
-  // ---------- Helpers ----------
   function showScreen(id) {
     $$('.screen').forEach(s => s.classList.add('hidden'));
     $('#screen-' + id).classList.remove('hidden');
@@ -46,7 +46,7 @@
     } catch (e) {}
   }
 
-  // ---------- Home-Bildschirm ----------
+  // ---------- Home ----------
   $$('.tab').forEach(tab => {
     tab.addEventListener('click', () => {
       $$('.tab').forEach(t => t.classList.remove('active'));
@@ -99,7 +99,7 @@
 
   // ---------- Spiel ----------
   $('#btn-stop').addEventListener('click', () => {
-    if (!confirm('Stopp drücken? Damit endet die Runde sofort für alle!')) return;
+    if ($('#btn-stop').disabled) return;
     socket.emit('stop-round');
   });
 
@@ -109,18 +109,11 @@
   });
 
   // ---------- Ergebnisse ----------
-  $('#btn-next-round').addEventListener('click', () => {
-    socket.emit('start-round');
-  });
-
-  $('#btn-new-game').addEventListener('click', () => {
-    socket.emit('new-game');
-  });
+  $('#btn-next-round').addEventListener('click', () => socket.emit('start-round'));
+  $('#btn-new-game').addEventListener('click', () => socket.emit('new-game'));
 
   // ---------- Socket-Events ----------
-  socket.on('connect', () => {
-    loadSession();
-  });
+  socket.on('connect', () => { loadSession(); });
 
   socket.on('joined', ({ code, playerId }) => {
     state.code = code;
@@ -128,20 +121,18 @@
     saveSession();
   });
 
-  socket.on('error-message', (msg) => {
-    toast(msg || 'Fehler');
-  });
+  socket.on('error-message', (msg) => { toast(msg || 'Fehler'); });
 
   socket.on('room-update', (room) => {
     state.room = room;
-    const isHost = room.hostId === state.playerId;
-    setHostBody(isHost);
+    setHostBody(room.hostId === state.playerId);
     render(room);
   });
 
   // ---------- Render ----------
   function render(room) {
     if (room.state === 'lobby') renderLobby(room);
+    else if (room.state === 'countdown') renderCountdown(room);
     else if (room.state === 'playing') renderPlay(room);
     else if (room.state === 'scoring') renderScoring(room);
     else if (room.state === 'roundResults' || room.state === 'gameOver') renderResults(room);
@@ -185,25 +176,39 @@
     }
   }
 
-  let lastRenderedLetter = null;
+  function renderCountdown(room) {
+    showScreen('countdown');
+    $('#cd-round').textContent = room.currentRound;
+    $('#cd-total').textContent = room.totalRounds;
+    state.lastFormSig = null; // Spiel-Form muss neu aufgebaut werden
+    if (state.countdownHandle) clearInterval(state.countdownHandle);
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((room.countdownEnd - Date.now()) / 1000));
+      $('#countdown-num').textContent = remaining > 0 ? remaining : 'LOS!';
+      if (remaining <= 0) clearInterval(state.countdownHandle);
+    };
+    tick();
+    state.countdownHandle = setInterval(tick, 100);
+  }
+
   function renderPlay(room) {
     showScreen('play');
+    if (state.countdownHandle) { clearInterval(state.countdownHandle); state.countdownHandle = null; }
     $('#play-round').textContent = room.currentRound;
     $('#play-total').textContent = room.totalRounds;
     $('#play-letter').textContent = room.letter;
 
-    // Re-build Formular wenn neuer Buchstabe oder neue Kategorien
-    const sig = room.letter + '|' + room.categories.join(',');
-    if (sig !== lastRenderedLetter) {
-      lastRenderedLetter = sig;
+    const sig = room.letter + '|' + room.categories.join(',') + '|' + room.currentRound;
+    if (sig !== state.lastFormSig) {
+      state.lastFormSig = sig;
       const form = $('#play-form');
       form.innerHTML = '';
-      const me = room.players.find(p => p.id === state.playerId);
       for (const cat of room.categories) {
         const wrap = document.createElement('div');
         wrap.className = 'cat-field';
         const id = 'cat-' + cat.replace(/\W+/g, '_');
-        wrap.innerHTML = `<label for="${id}">${escapeHtml(cat)}</label>`;
+        wrap.innerHTML = `<label for="${id}"></label>`;
+        wrap.querySelector('label').textContent = cat;
         const input = document.createElement('input');
         input.id = id;
         input.type = 'text';
@@ -214,18 +219,17 @@
         input.addEventListener('input', () => {
           input.classList.toggle('filled', input.value.trim().length > 0);
           socket.emit('update-answer', { category: cat, value: input.value });
+          updateStopButton();
         });
         wrap.appendChild(input);
         form.appendChild(wrap);
       }
-      // Erstes Feld fokussieren
       setTimeout(() => form.querySelector('input')?.focus(), 60);
     }
 
-    // Timer
     startTimer(room.endTime);
+    updateStopButton();
 
-    // Fortschritt anderer Spieler
     const prog = $('#play-progress');
     prog.innerHTML = '';
     const total = room.categories.length;
@@ -236,6 +240,17 @@
       chip.textContent = p.name + ' ' + p.answersFilled + '/' + total;
       prog.appendChild(chip);
     }
+  }
+
+  function updateStopButton() {
+    const inputs = $$('#play-form input');
+    if (!inputs.length) return;
+    const allFilled = inputs.every(i => i.value.trim().length > 0);
+    const btn = $('#btn-stop');
+    btn.disabled = !allFilled;
+    $('#stop-hint').textContent = allFilled
+      ? 'Du kannst jetzt stoppen — die Runde endet sofort für alle.'
+      : 'Fülle erst alle Kategorien aus — dann kannst du stoppen.';
   }
 
   function startTimer(endTime) {
@@ -261,8 +276,8 @@
 
     const stopper = room.players.find(p => p.id === room.stopperId);
     $('#score-info').textContent = stopper
-      ? `${stopper.name} hat gestoppt — überprüft jetzt die Antworten:`
-      : 'Zeit abgelaufen — überprüft jetzt die Antworten:';
+      ? `${stopper.name} hat gestoppt — Schreibfehler sind automatisch korrigiert. Antworten kontrollieren:`
+      : 'Zeit abgelaufen — Schreibfehler sind automatisch korrigiert. Antworten kontrollieren:';
 
     const container = $('#scoring-list');
     container.innerHTML = '';
@@ -276,48 +291,76 @@
 
       const entries = (room.answers && room.answers[cat]) || [];
       for (const entry of entries) {
-        const row = document.createElement('div');
-        row.className = 'score-row' + (entry.valid ? '' : ' invalid');
-
-        const nameEl = document.createElement('span');
-        nameEl.className = 'name';
-        nameEl.textContent = entry.name;
-
-        const ansEl = document.createElement('span');
-        ansEl.className = 'ans';
-        if (!entry.answer) {
-          ansEl.innerHTML = '<span class="empty">(leer)</span>';
-        } else {
-          ansEl.textContent = entry.answer;
-        }
-
-        row.appendChild(nameEl);
-        row.appendChild(ansEl);
-
-        if (entry.playerId !== state.playerId && entry.answer) {
-          const cnt = document.createElement('span');
-          cnt.className = 'vote-count';
-          cnt.textContent = entry.downvotes > 0 ? '✕' + entry.downvotes : '';
-          row.appendChild(cnt);
-
-          const btn = document.createElement('button');
-          btn.className = 'vote-btn' + (entry.myVote === false ? ' active invalid' : '');
-          btn.textContent = entry.myVote === false ? '✕' : '?';
-          btn.title = 'Antwort als ungültig markieren';
-          btn.onclick = () => {
-            socket.emit('vote', {
-              category: cat,
-              targetPlayerId: entry.playerId,
-              valid: entry.myVote === false ? null : false
-            });
-          };
-          row.appendChild(btn);
-        }
-
-        block.appendChild(row);
+        block.appendChild(renderScoreRow(cat, entry));
       }
       container.appendChild(block);
     }
+  }
+
+  function renderScoreRow(cat, entry) {
+    const row = document.createElement('div');
+    row.className = 'score-row' + (entry.valid ? ' is-valid' : ' is-invalid');
+
+    const nameEl = document.createElement('span');
+    nameEl.className = 'name';
+    nameEl.textContent = entry.name;
+    row.appendChild(nameEl);
+
+    const ansWrap = document.createElement('div');
+    ansWrap.className = 'ans-wrap';
+    if (!entry.answer) {
+      ansWrap.innerHTML = '<span class="empty">(leer)</span>';
+    } else if (entry.corrected) {
+      const orig = document.createElement('span');
+      orig.className = 'ans original';
+      orig.textContent = entry.answer;
+      const arrow = document.createElement('span');
+      arrow.className = 'arrow';
+      arrow.textContent = '→';
+      const corr = document.createElement('span');
+      corr.className = 'ans corrected';
+      corr.textContent = entry.normalized;
+      ansWrap.appendChild(orig);
+      ansWrap.appendChild(arrow);
+      ansWrap.appendChild(corr);
+    } else {
+      const ans = document.createElement('span');
+      ans.className = 'ans';
+      ans.textContent = entry.answer;
+      ansWrap.appendChild(ans);
+    }
+    row.appendChild(ansWrap);
+
+    const verdict = document.createElement('span');
+    verdict.className = 'verdict ' + (entry.valid ? 'ok' : 'bad');
+    verdict.textContent = entry.valid ? '✓' : '✗';
+    verdict.title = verdictReason(entry);
+    row.appendChild(verdict);
+
+    if (entry.playerId !== state.playerId && entry.answer) {
+      const overrideBtn = document.createElement('button');
+      overrideBtn.className = 'override-btn';
+      const desired = !entry.valid;
+      overrideBtn.textContent = entry.myVote === null ? 'anfechten' : (entry.myVote === desired ? '↺' : '✓');
+      // Wir senden eine Stimme entgegen der aktuellen Bewertung
+      overrideBtn.title = entry.valid ? 'Als ungültig markieren' : 'Als gültig markieren';
+      overrideBtn.onclick = () => {
+        const newVote = entry.myVote === null ? !entry.autoValid : (entry.myVote === !entry.autoValid ? null : !entry.autoValid);
+        socket.emit('vote', { category: cat, targetPlayerId: entry.playerId, valid: newVote });
+      };
+      row.appendChild(overrideBtn);
+    }
+
+    return row;
+  }
+
+  function verdictReason(entry) {
+    if (!entry.answer) return 'Keine Antwort';
+    if (entry.status === 'wrong-letter') return 'Beginnt nicht mit dem Buchstaben';
+    if (entry.status === 'unknown') return 'Nicht im Wörterbuch — per Mehrheit gültig/ungültig';
+    if (entry.status === 'corrected') return 'Schreibfehler erkannt und korrigiert';
+    if (entry.status === 'ok') return 'Im Wörterbuch erkannt';
+    return '';
   }
 
   function renderResults(room) {
@@ -347,12 +390,5 @@
     $('#btn-new-game').classList.toggle('hidden', !isFinal);
   }
 
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, c => ({
-      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-    }[c]));
-  }
-
-  // ---------- Init ----------
   loadSession();
 })();
